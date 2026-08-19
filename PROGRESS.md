@@ -37,3 +37,12 @@
 - 単一ファイル `index.html` に HTML/CSS/JS を全部書く。
 - 外部ライブラリなし。ブラウザで開けば遊べる。
 - 実装順: t1骨格 → t2マップ/FOV → t3移動/ターン → t4敵AI/戦闘/成長 → t5アイテム/トラップ → t6複数フロア/勝敗 → t7 Playwright検証。
+
+## 2026-08-19 — GitHub公開・Pagesデプロイ完了
+- リポジトリ: `kouhei1970/qwen_dungeon`（public、mainブランチ）。
+- Wizライク→Rogueライクに名称変更（UI全7箇所、commit a10c3c5）。
+- SNSカード: `card.html`（1200×630 OGP）+ `docs/og-image.png`（レンダリング済みPNG）。
+- GitHub Pages: `.github/workflows/pages.yml` でデプロイ（build_type=workflow、mainブランチ、ルート）。
+- gh トークンに workflow スコープ追加後、push 成功（commit 47c2a07）。
+- Pages デプロイ完了: `https://kouhei1970.github.io/qwen_dungeon/` → HTTP 200。
+- og-image.png も配信確認済み（HTTP 200, image/png）。
