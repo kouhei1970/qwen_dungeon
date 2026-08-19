@@ -68,4 +68,4 @@ qwen_dungeon/
 
 ## ライセンス
 
-自由に使ってください。
+[MIT License](LICENSE) — 自由に使ってください。
