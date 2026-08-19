@@ -1,0 +1,7 @@
+# OS / editor
+.DS_Store
+*.swp
+*~
+
+# Playwright MCP 一時出力
+.playwright-mcp/

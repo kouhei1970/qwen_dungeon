@@ -1,0 +1,694 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wizライク ダンジョンRPG</title>
+<style>
+  :root {
+    --bg: #0b0e14;
+    --panel: #131826;
+    --border: #2a3350;
+    --text: #cdd6f4;
+    --dim: #7c88a8;
+    --accent: #f9e2af;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: "Courier New", monospace;
+  }
+  #app {
+    max-width: 960px; margin: 0 auto; padding: 12px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  h1 { font-size: 18px; margin: 4px 0; color: var(--accent); letter-spacing: 1px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px 12px;
+  }
+  /* --- top status bar --- */
+  #status { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 13px; }
+  #status .stat b { color: var(--accent); }
+  .bar { display: inline-block; width: 90px; height: 12px; background: #000;
+    border: 1px solid var(--border); vertical-align: middle; margin-left: 4px; position: relative; }
+  .bar > i { position: absolute; left: 0; top: 0; bottom: 0; display: block; }
+  .bar.hp > i { background: #f38ba8; }
+  .bar.mp > i { background: #89b4fa; }
+  .bar.xp > i { background: #a6e3a1; }
+  /* --- map --- */
+  #mapwrap { display: flex; justify-content: center; }
+  canvas#map { background: #05070c; border: 1px solid var(--border); image-rendering: pixelated; }
+  /* --- log --- */
+  #log { height: 130px; overflow-y: auto; font-size: 12.5px; line-height: 1.5; }
+  #log .line { color: var(--dim); }
+  #log .line.good { color: #a6e3a1; }
+  #log .line.bad { color: #f38ba8; }
+  #log .line.warn { color: #f9e2af; }
+  /* --- controls / help --- */
+  #help { font-size: 11.5px; color: var(--dim); line-height: 1.6; }
+  #help b { color: var(--text); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  button {
+    background: #1f2740; color: var(--text); border: 1px solid var(--border);
+    border-radius: 5px; padding: 6px 12px; font-family: inherit; cursor: pointer; font-size: 13px;
+  }
+  button:hover { background: #2a3557; }
+  /* --- overlay (game over / victory) --- */
+  #overlay {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.72); z-index: 10;
+  }
+  #overlay .box {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 24px 32px; text-align: center; max-width: 420px;
+  }
+  #overlay h2 { margin: 0 0 12px; font-size: 22px; }
+  #overlay .win { color: #a6e3a1; }
+  #overlay .lose { color: #f38ba8; }
+</style>
+</head>
+<body>
+<div id="app">
+  <h1>⚔ Wizライク ダンジョンRPG</h1>
+
+  <div class="panel" id="status"></div>
+
+  <div class="panel">
+    <div id="mapwrap"><canvas id="map" width="640" height="384"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <div id="log"></div>
+  </div>
+
+  <div class="panel row">
+    <button id="btn-restart">リスタート</button>
+    <div id="help">
+      <b>操作:</b> 矢印/WASD=移動・攻撃 &nbsp; 空白=待機 &nbsp; <b>e</b>=拾う &nbsp;
+      <b>q</b>=装備 &nbsp; <b>p</b>=ポーション &nbsp; 階段(↓)で自動下降<br>
+      最終フロアに到達すると勝利。トラップは踏むまで見えない。
+    </div>
+  </div>
+</div>
+
+<div id="overlay">
+  <div class="box">
+    <h2 id="ov-title"></h2>
+    <p id="ov-msg" style="color:var(--dim)"></p>
+    <button id="btn-again">もう一度プレイ</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   Wizライク ダンジョンRPG — 単一ファイル実装
+   ============================================================ */
+
+// ---- 定数 / 設定 ----
+const MAP_W = 40, MAP_H = 24;        // マップ幅・高さ（セル）
+const CELL = 16;                     // 1セルのピクセル
+const VIEW_R = 7;                    // FOV 半径
+const NUM_FLOORS = 8;                // 総フロア数（最終=勝利）
+const AGGRO_RANGE = 6;               // 敵の警戒範囲
+
+// 敵種族（階層で強化）
+const ENEMY_TYPES = [
+  { name: "ゴブリン",  ch: "g", hp: 8,  atk: 3, def: 1, xp: 5,  color: "#a6e3a1" },
+  { name: "スライム",  ch: "s", hp: 12, atk: 4, def: 0, xp: 7,  color: "#89dceb" },
+  { name: "オーク",    ch: "o", hp: 18, atk: 6, def: 3, xp: 12, color: "#fab387" },
+  { name: "ゴースト",  ch: "G", hp: 14, atk: 8, def: 2, xp: 15, color: "#cba6f7" },
+  { name: "ドラゴン",  ch: "D", hp: 30, atk: 12, def: 6, xp: 40, color: "#f38ba8" },
+];
+
+// ---- グローバル状態 ----
+let map = [];            // 2D配列: { type, seen, visible, entity }
+let player = null;
+let floor = 1;
+let game = { over: false, won: false };
+let rng = mulberry32(0);   // 再現可能な乱数（リスタートで種を差し替え）
+
+// ---- 乱数（mulberry32）----
+function mulberry32(a) {
+  return function() {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function rand(n) { return Math.floor(rng() * n); }
+function randRange(a, b) { return a + rand(b - a + 1); }
+function chance(p) { return rng() < p; }
+
+// ---- DOM ----
+const canvas = document.getElementById("map");
+const ctx = canvas.getContext("2d");
+canvas.width = MAP_W * CELL;
+canvas.height = MAP_H * CELL;
+const statusEl = document.getElementById("status");
+const logEl = document.getElementById("log");
+const overlay = document.getElementById("overlay");
+const ovTitle = document.getElementById("ov-title");
+const ovMsg = document.getElementById("ov-msg");
+
+// ---- ログ ----
+function log(msg, cls) {
+  const line = document.createElement("div");
+  line.className = "line" + (cls ? " " + cls : "");
+  line.textContent = msg;
+  logEl.appendChild(line);
+  while (logEl.children.length > 60) logEl.removeChild(logEl.firstChild);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ---- プレイヤー生成 ----
+function newPlayer() {
+  return {
+    x: 0, y: 0,
+    level: 1, xp: 0, xpNext: 20,
+    hp: 30, maxHp: 30, mp: 10, maxMp: 10,
+    baseAtk: 5, baseDef: 2,
+    gold: 0, potions: 2,
+    weapon: null, armor: null,
+  };
+}
+// 実効攻撃/防御（装備込み）
+function pAtk() { return player.baseAtk + (player.weapon ? player.weapon.atk : 0); }
+function pDef() { return player.baseDef + (player.armor ? player.armor.def : 0); }
+
+// ---- マップ生成 ----
+// 部屋をランダム配置 → 廊下で接続 → 階段1つ確保
+function generateFloor(f) {
+  map = [];
+  for (let y = 0; y < MAP_H; y++) {
+    const row = [];
+    for (let x = 0; x < MAP_W; x++) {
+      row.push({ type: "wall", seen: false, visible: false, entity: null });
+    }
+    map.push(row);
+  }
+  const rooms = [];
+  const attempts = 60;
+  for (let i = 0; i < attempts; i++) {
+    const w = randRange(4, 8), h = randRange(3, 5);
+    const x = randRange(1, MAP_W - w - 2);
+    const y = randRange(1, MAP_H - h - 2);
+    // 既存部屋と重ならないか（1セル余白）
+    let overlap = false;
+    for (const r of rooms) {
+      if (x < r.x + r.w + 1 && x + w + 1 > r.x && y < r.y + r.h + 1 && y + h + 1 > r.y) {
+        overlap = true; break;
+      }
+    }
+    if (overlap) continue;
+    const room = { x, y, w, h, cx: Math.floor(x + w/2), cy: Math.floor(y + h/2) };
+    for (let yy = y; yy < y + h; yy++)
+      for (let xx = x; xx < x + w; xx++)
+        map[yy][xx].type = "floor";
+    rooms.push(room);
+  }
+  // 廊下で接続（各部屋を前室と L 字で結ぶ）
+  for (let i = 1; i < rooms.length; i++) {
+    const a = rooms[i-1], b = rooms[i];
+    carveCorridor(a.cx, a.cy, b.cx, b.cy);
+  }
+  // 階段を最後の部屋に配置
+  if (rooms.length === 0) {
+    // 生成失敗の保険: 中央を空ける
+    for (let yy = 10; yy < 14; yy++)
+      for (let xx = 18; xx < 22; xx++) map[yy][xx].type = "floor";
+    rooms.push({ x: 18, y: 10, w: 4, h: 4, cx: 20, cy: 12 });
+  }
+  const startRoom = rooms[0];
+  const endRoom = rooms[rooms.length - 1];
+
+  // 階段（↓）を最終部屋に
+  map[endRoom.cy][endRoom.cx].type = "floor";
+  map[endRoom.cy][endRoom.cx].entity = { kind: "stairs" };
+
+  // プレイヤー開始位置
+  player.x = startRoom.cx; player.y = startRoom.cy;
+
+  // 敵・アイテム・トラップ配置（階層で密度と強さ）
+  const enemyCount = 3 + f * 2 + rand(3);
+  placeEntities(rooms, endRoom, {
+    enemies: enemyCount,
+    items: 1 + Math.floor(f / 2) + rand(2),
+    traps: 2 + f + rand(2),
+    floor: f,
+  });
+}
+
+function carveCorridor(x1, y1, x2, y2) {
+  // 水平→垂直 の L 字
+  if (chance(0.5)) {
+    for (let x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) map[y1][x].type = "floor";
+    for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) map[y][x2].type = "floor";
+  } else {
+    for (let y = Math.min(y1, y2); y <= Math.max(y1, y2); y++) map[y][x1].type = "floor";
+    for (let x = Math.min(x1, x2); x <= Math.max(x1, x2); x++) map[y2][x].type = "floor";
+  }
+}
+
+// 空きフロアセルのリスト（開始・階段・他エンティティを避ける）
+function freeCells(rooms, endRoom) {
+  const cells = [];
+  for (const r of rooms) {
+    if (r === endRoom) continue;
+    for (let yy = r.y; yy < r.y + r.h; yy++)
+      for (let xx = r.x; xx < r.x + r.w; xx++) {
+        const c = map[yy][xx];
+        if (c.type === "floor" && !c.entity && !(xx === player.x && yy === player.y))
+          cells.push({ x: xx, y: yy });
+      }
+  }
+  return cells;
+}
+
+function placeEntities(rooms, endRoom, cfg) {
+  let cells = freeCells(rooms, endRoom);
+  // シャッフル
+  for (let i = cells.length - 1; i > 0; i--) {
+    const j = rand(i + 1);
+    [cells[i], cells[j]] = [cells[j], cells[i]];
+  }
+  let idx = 0;
+  function take() { return cells[idx++]; }
+
+  // 敵
+  for (let i = 0; i < cfg.enemies; i++) {
+    const c = take(); if (!c) break;
+    map[c.y][c.x].entity = makeEnemy(cfg.floor);
+  }
+  // アイテム
+  for (let i = 0; i < cfg.items; i++) {
+    const c = take(); if (!c) break;
+    map[c.y][c.x].entity = makeItem(cfg.floor);
+  }
+  // トラップ（踏むまで見えない）
+  for (let i = 0; i < cfg.traps; i++) {
+    const c = take(); if (!c) break;
+    map[c.y][c.x].entity = { kind: "trap", dmg: 3 + cfg.floor + rand(4) };
+  }
+}
+
+function makeEnemy(f) {
+  // 階層で強い種族の確率を上げる
+  const maxType = Math.min(ENEMY_TYPES.length - 1, Math.floor((f - 1) / 2));
+  const t = ENEMY_TYPES[rand(maxType + 1)];
+  const scale = 1 + (f - 1) * 0.15;
+  return {
+    kind: "enemy",
+    name: t.name, ch: t.ch, color: t.color,
+    hp: Math.round(t.hp * scale), maxHp: Math.round(t.hp * scale),
+    atk: Math.round(t.atk * scale), def: Math.round(t.def * scale),
+    xp: Math.round(t.xp * scale), aggroRange: AGGRO_RANGE,
+  };
+}
+
+function makeItem(f) {
+  const roll = rng();
+  if (roll < 0.45) {
+    // 武器
+    return { kind: "item", type: "weapon", name: "武器", atk: 2 + f + rand(3), ch: "/", color: "#f9e2af" };
+  } else if (roll < 0.8) {
+    // 防具
+    return { kind: "item", type: "armor", name: "防具", def: 1 + Math.floor(f / 2) + rand(2), ch: "[", color: "#89b4fa" };
+  } else {
+    // ポーション
+    return { kind: "item", type: "potion", name: "ポーション", heal: 15 + f * 3, ch: "!", color: "#a6e3a1" };
+  }
+}
+
+// ---- FOV（半径 + 壁で遮断）----
+function computeFOV() {
+  // 全セル visible=false にリセット
+  for (let y = 0; y < MAP_H; y++)
+    for (let x = 0; x < MAP_W; x++) map[y][x].visible = false;
+
+  const px = player.x, py = player.y;
+  // 4方向のビーム走査（簡易レイキャスト）
+  for (let a = 0; a < 360; a += 5) {
+    const rad = a * Math.PI / 180;
+    let dx = Math.cos(rad), dy = Math.sin(rad);
+    let x = px + 0.5, y = py + 0.5;
+    for (let step = 0; step < VIEW_R * 2; step++) {
+      const cx = Math.floor(x), cy = Math.floor(y);
+      if (cx < 0 || cy < 0 || cx >= MAP_W || cy >= MAP_H) break;
+      const cell = map[cy][cx];
+      if (cell.visible === false) {
+        cell.visible = true; cell.seen = true;
+      }
+      if (cell.type === "wall") break; // 壁で遮断
+      x += dx; y += dy;
+    }
+  }
+  // プレイヤー自身と近傍を確実に表示
+  for (let dy = -1; dy <= 1; dy++)
+    for (let dx = -1; dx <= 1; dx++) {
+      const cx = px + dx, cy = py + dy;
+      if (cx >= 0 && cy >= 0 && cx < MAP_W && cy < MAP_H) {
+        map[cy][cx].visible = true; map[cy][cx].seen = true;
+      }
+    }
+}
+
+// ---- 描画 ----
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  for (let y = 0; y < MAP_H; y++) {
+    for (let x = 0; x < MAP_W; x++) {
+      const c = map[y][x];
+      if (!c.seen) continue; // 未探索は黒
+      const px = x * CELL, py = y * CELL;
+      // 床/壁
+      if (c.type === "wall") {
+        ctx.fillStyle = c.visible ? "#3a4260" : "#1c2238";
+      } else {
+        ctx.fillStyle = c.visible ? "#0f1420" : "#0a0e18";
+      }
+      ctx.fillRect(px, py, CELL, CELL);
+
+      // 階段
+      if (c.entity && c.entity.kind === "stairs" && c.seen) {
+        drawChar("↓", px, py, c.visible ? "#f9e2af" : "#5a4a20");
+      }
+      // トラップは踏むまで見えない（描画しない）
+      // 敵・アイテムは visible のときだけ表示
+      if (c.entity && c.visible) {
+        const e = c.entity;
+        if (e.kind === "enemy") drawChar(e.ch, px, py, e.color);
+        else if (e.kind === "item") drawChar(e.ch, px, py, e.color);
+      }
+    }
+  }
+  // プレイヤー（最前面）
+  const ppx = player.x * CELL, ppy = player.y * CELL;
+  ctx.fillStyle = "#0f1420";
+  ctx.fillRect(ppx, ppy, CELL, CELL);
+  drawChar("@", ppx, ppy, "#f5c2e7");
+}
+
+function drawChar(ch, px, py, color) {
+  ctx.fillStyle = color;
+  ctx.font = "13px 'Courier New', monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(ch, px + CELL/2, py + CELL/2 + 1);
+}
+
+// ---- ステータス表示 ----
+function renderStatus() {
+  const hpPct = Math.max(0, player.hp / player.maxHp * 100);
+  const mpPct = Math.max(0, player.mp / player.maxMp * 100);
+  const xpPct = Math.min(100, player.xp / player.xpNext * 100);
+  statusEl.innerHTML =
+    `<span class="stat">Lv <b>${player.level}</b></span>` +
+    `<span class="stat">HP ${player.hp}/${player.maxHp}` +
+      `<span class="bar hp"><i style="width:${hpPct}%"></i></span></span>` +
+    `<span class="stat">MP ${player.mp}/${player.maxMp}` +
+      `<span class="bar mp"><i style="width:${mpPct}%"></i></span></span>` +
+    `<span class="stat">XP ${player.xp}/${player.xpNext}` +
+      `<span class="bar xp"><i style="width:${xpPct}%"></i></span></span>` +
+    `<span class="stat">階 <b>${floor}/${NUM_FLOORS}</b></span>` +
+    `<span class="stat">ATK <b>${pAtk()}</b> DEF <b>${pDef()}</b></span>` +
+    `<span class="stat">金 <b>${player.gold}</b></span>` +
+    `<span class="stat">武器 ${player.weapon ? player.weapon.name+"(+"+player.weapon.atk+")" : "なし"}</span>` +
+    `<span class="stat">防具 ${player.armor ? player.armor.name+"(+"+player.armor.def+")" : "なし"}</span>` +
+    `<span class="stat">ポーション <b>${player.potions}</b></span>`;
+}
+
+function render() { draw(); renderStatus(); }
+
+// ---- 移動可否 ----
+function isWalkable(x, y) {
+  if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) return false;
+  const c = map[y][x];
+  if (c.type === "wall") return false;
+  if (c.entity && c.entity.kind === "enemy") return false; // 敵は攻撃対象
+  return true;
+}
+function enemyAt(x, y) {
+  const c = map[y] && map[y][x];
+  return (c && c.entity && c.entity.kind === "enemy") ? c.entity : null;
+}
+
+// ---- プレイヤー移動 / ターン ----
+function tryMove(dx, dy) {
+  if (game.over) return;
+  const nx = player.x + dx, ny = player.y + dy;
+  // 敵がいる方向なら攻撃
+  const target = enemyAt(nx, ny);
+  if (target) { attackEnemy(target); endPlayerTurn(); return; }
+  if (!isWalkable(nx, ny)) { endPlayerTurn(); return; } // 壁はターン消費
+
+  player.x = nx; player.y = ny;
+  const cell = map[ny][nx];
+
+  // トラップ判定
+  if (cell.entity && cell.entity.kind === "trap") {
+    const dmg = Math.max(1, cell.entity.dmg - pDef() / 2 | 0);
+    player.hp -= dmg;
+    log(`トラップを踏んだ！ ${dmg} ダメージを受けた。`, "bad");
+    cell.entity = null; // 一度きり
+    if (player.hp <= 0) { die(); return; }
+  }
+
+  // 階段判定
+  if (cell.entity && cell.entity.kind === "stairs") {
+    descend();
+    endPlayerTurn();
+    return;
+  }
+
+  endPlayerTurn();
+}
+
+// 待機（ターン消費）
+function waitTurn() {
+  if (game.over) return;
+  log("一休みした。", "");
+  endPlayerTurn();
+}
+
+// ---- 戦闘 ----
+function attackEnemy(enemy) {
+  const dmg = Math.max(1, pAtk() - enemy.def + randRange(-1, 2));
+  enemy.hp -= dmg;
+  log(`${enemy.name} に ${dmg} ダメージ。`, "warn");
+  if (enemy.hp <= 0) {
+    // 倒した
+    const cell = findCellOf(enemy);
+    if (cell) cell.entity = null;
+    log(`${enemy.name} を倒した！ +${enemy.xp} XP`, "good");
+    gainXp(enemy.xp);
+    player.gold += randRange(0, 3 + floor);
+  }
+}
+
+function findCellOf(entity) {
+  for (let y = 0; y < MAP_H; y++)
+    for (let x = 0; x < MAP_W; x++)
+      if (map[y][x].entity === entity) return map[y][x];
+  return null;
+}
+
+// ---- 経験値 / レベルアップ ----
+function gainXp(amount) {
+  player.xp += amount;
+  while (player.xp >= player.xpNext) {
+    player.xp -= player.xpNext;
+    levelUp();
+  }
+}
+function levelUp() {
+  player.level++;
+  player.maxHp += 6;
+  player.maxMp += 3;
+  player.baseAtk += 1;
+  player.baseDef += 1;
+  player.hp = player.maxHp;   // 全回復
+  player.mp = player.maxMp;
+  player.xpNext = Math.round(player.xpNext * 1.5) + 10;
+  log(`レベルアップ！ Lv${player.level}（HP/MP全回復）`, "good");
+}
+
+// ---- 敵のターン ----
+function enemyTurn() {
+  for (let y = 0; y < MAP_H; y++) {
+    for (let x = 0; x < MAP_W; x++) {
+      const c = map[y][x];
+      if (!c.entity || c.entity.kind !== "enemy") continue;
+      const e = c.entity;
+      const dist = Math.abs(e.x - player.x) + Math.abs(e.y - player.y);
+      // 敵の位置をセルに反映（移動用）
+      e.x = x; e.y = y;
+
+      if (dist === 1) {
+        // 隣接 → 攻撃
+        const dmg = Math.max(1, e.atk - pDef() + randRange(-1, 1));
+        player.hp -= dmg;
+        log(`${e.name} が攻撃！ ${dmg} ダメージ。`, "bad");
+        if (player.hp <= 0) { die(); return; }
+      } else if (dist <= e.aggroRange) {
+        // 追撃: プレイヤーへ1セル移動（壁・他敵を避ける）
+        moveEnemyToward(e, x, y);
+      }
+    }
+  }
+}
+
+function moveEnemyToward(e, x, y) {
+  const dx = Math.sign(player.x - x), dy = Math.sign(player.y - y);
+  // 優先順位: 大きい軸を先に試す
+  const tries = [];
+  if (Math.abs(player.x - x) >= Math.abs(player.y - y)) {
+    if (dx !== 0) tries.push([dx, 0]);
+    if (dy !== 0) tries.push([0, dy]);
+  } else {
+    if (dy !== 0) tries.push([0, dy]);
+    if (dx !== 0) tries.push([dx, 0]);
+  }
+  for (const [mx, my] of tries) {
+    const nx = x + mx, ny = y + my;
+    if (nx < 0 || ny < 0 || nx >= MAP_W || ny >= MAP_H) continue;
+    const nc = map[ny][nx];
+    if (nc.type === "wall") continue;
+    if (nc.entity && nc.entity.kind === "enemy") continue;
+    // 移動
+    map[y][x].entity = null;
+    e.x = nx; e.y = ny;
+    map[ny][nx].entity = e;
+    return;
+  }
+}
+
+// ---- ターン終了（敵のターン実行）----
+function endPlayerTurn() {
+  if (game.over) return;
+  enemyTurn();
+  computeFOV();
+  render();
+}
+
+// ---- アイテム ----
+function pickUp() {
+  if (game.over) return;
+  const cell = map[player.y][player.x];
+  const e = cell.entity;
+  if (!e || e.kind !== "item") { log("ここに拾えるものはない。", ""); endPlayerTurn(); return; }
+  if (e.type === "weapon") {
+    if (!player.weapon || e.atk > player.weapon.atk) {
+      log(`${e.name}(+${e.atk}) を装備した。`, "good");
+      player.weapon = { name: e.name, atk: e.atk };
+    } else {
+      log(`現在の武器の方が強いので捨てた。`, "");
+    }
+  } else if (e.type === "armor") {
+    if (!player.armor || e.def > player.armor.def) {
+      log(`${e.name}(+${e.def}) を装備した。`, "good");
+      player.armor = { name: e.name, def: e.def };
+    } else {
+      log(`現在の防具の方が強いので捨てた。`, "");
+    }
+  } else if (e.type === "potion") {
+    player.potions++;
+    log(`${e.name} を拾った（所持 ${player.potions}）。`, "good");
+  }
+  cell.entity = null;
+  endPlayerTurn();
+}
+
+function equip() {
+  // 装備は拾取時に自動装備するため、ここでは状態表示
+  if (game.over) return;
+  log(`武器: ${player.weapon ? player.weapon.name+"(+"+player.weapon.atk+")" : "なし"} / ` +
+      `防具: ${player.armor ? player.armor.name+"(+"+player.armor.def+")" : "なし"}`, "");
+  endPlayerTurn();
+}
+
+function usePotion() {
+  if (game.over) return;
+  if (player.potions <= 0) { log("ポーションを持っていない。", "warn"); return; }
+  player.potions--;
+  const heal = 20 + floor * 2;
+  const before = player.hp;
+  player.hp = Math.min(player.maxHp, player.hp + heal);
+  log(`ポーションを飲んだ。 HP ${before}→${player.hp}（+${player.hp - before}）`, "good");
+  endPlayerTurn();
+}
+
+// ---- 階段下降 / 勝敗 ----
+function descend() {
+  if (floor >= NUM_FLOORS) {
+    victory();
+    return;
+  }
+  floor++;
+  log(`--- 第 ${floor} 層へ降りた ---`, "warn");
+  generateFloor(floor);
+  computeFOV();
+  render();
+}
+
+function die() {
+  game.over = true;
+  overlay.style.display = "flex";
+  ovTitle.textContent = "GAME OVER";
+  ovTitle.className = "lose";
+  ovMsg.textContent = `第 ${floor} 層で倒れた。 Lv${player.level} / 金 ${player.gold}`;
+  log("あなたは死んだ…", "bad");
+}
+
+function victory() {
+  game.over = true;
+  overlay.style.display = "flex";
+  ovTitle.textContent = "VICTORY!";
+  ovTitle.className = "win";
+  ovMsg.textContent = `最深の第 ${NUM_FLOORS} 層を制覇した！ Lv${player.level} / 金 ${player.gold}`;
+  log("ダンジョンを攻略した！", "good");
+}
+
+// ---- リスタート ----
+function restart() {
+  rng = mulberry32((Date.now() ^ (Math.random() * 0xffffffff)) >>> 0);
+  player = newPlayer();
+  floor = 1;
+  game = { over: false, won: false };
+  overlay.style.display = "none";
+  logEl.innerHTML = "";
+  log("ダンジョンに降り立った。最深の第 " + NUM_FLOORS + " 層を目指せ。", "warn");
+  generateFloor(1);
+  computeFOV();
+  render();
+}
+
+// ---- 入力ハンドラ ----
+document.addEventListener("keydown", (ev) => {
+  if (game.over) return;
+  let handled = true;
+  switch (ev.key) {
+    case "ArrowUp": case "w": case "W": tryMove(0, -1); break;
+    case "ArrowDown": case "s": case "S": tryMove(0, 1); break;
+    case "ArrowLeft": case "a": case "A": tryMove(-1, 0); break;
+    case "ArrowRight": case "d": case "D": tryMove(1, 0); break;
+    case " ": waitTurn(); break;
+    case "e": case "E": pickUp(); break;
+    case "q": case "Q": equip(); break;
+    case "p": case "P": usePotion(); break;
+    default: handled = false;
+  }
+  if (handled) ev.preventDefault();
+});
+
+document.getElementById("btn-restart").addEventListener("click", restart);
+document.getElementById("btn-again").addEventListener("click", restart);
+
+// ---- 起動 ----
+restart();
+</script>
+</body>
+</html>
