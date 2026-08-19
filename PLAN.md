@@ -1,7 +1,7 @@
-# Wizライク ダンジョンRPG — 作業計画
+# Rogueライク ダンジョンRPG — 作業計画
 
 ## ゴール
-ブラウザで遊べる、Wiz/Wizardry風のダンジョンRPGを **単一ファイル `index.html`** で実装する。
+ブラウザで遊べる、Rogue/Roguelike風のダンジョンRPGを **単一ファイル `index.html`** で実装する。
 HTML/CSS/JS を1ファイルにまとめる。ブラウザで開けば遊べる。
 
 ## 形式

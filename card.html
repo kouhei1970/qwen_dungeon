@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<style>
+   * { box-sizing: border-box; margin: 0; padding: 0; }
+   html, body { width: 1200px; height: 630px; overflow: hidden; }
+   body {
+     font-family: "Hiragino Sans", "Yu Gothic", "Meiryo", sans-serif;
+     background: radial-gradient(circle at 30% 20%, #1a2440 0%, #0b0e14 70%);
+     color: #cdd6f4; position: relative;
+   }
+   /* fake dungeon grid backdrop */
+   .grid {
+     position: absolute; inset: 0; opacity: 0.12;
+     background-image:
+       linear-gradient(#3a4260 1px, transparent 1px),
+       linear-gradient(90deg, #3a4260 1px, transparent 1px);
+     background-size: 40px 40px;
+   }
+   .glow {
+     position: absolute; right: -80px; top: -80px; width: 420px; height: 420px;
+     background: radial-gradient(circle, rgba(249,226,175,0.18), transparent 70%);
+   }
+   .content { position: relative; z-index: 2; padding: 64px 72px; height: 100%; display: flex; flex-direction: column; justify-content: center; }
+   .badge {
+     display: inline-block; font-size: 18px; letter-spacing: 3px; color: #f9e2af;
+     border: 1px solid #f9e2af55; border-radius: 4px; padding: 6px 16px; margin-bottom: 28px;
+     width: fit-content;
+   }
+   h1 { font-size: 76px; line-height: 1.05; color: #f5c2e7; text-shadow: 0 0 30px rgba(245,194,231,0.3); margin-bottom: 18px; }
+   h1 .sub { display: block; font-size: 34px; color: #cdd6f4; font-weight: 500; margin-top: 10px; letter-spacing: 2px; }
+   .tags { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 34px; }
+   .tag {
+     background: #1f2740; border: 1px solid #2a3350; color: #89b4fa;
+     padding: 8px 18px; border-radius: 20px; font-size: 20px;
+   }
+   .tag.good { color: #a6e3a1; border-color: #a6e3a155; }
+   .footer { display: flex; justify-content: space-between; align-items: flex-end; margin-top: auto; }
+   .url { font-size: 24px; color: #f9e2af; font-family: "Courier New", monospace; }
+   .tech { font-size: 18px; color: #7c88a8; text-align: right; line-height: 1.6; }
+   .glyphs { position: absolute; right: 60px; bottom: 40px; font-family: "Courier New", monospace; font-size: 30px; color: #f38ba8; opacity: 0.5; letter-spacing: 12px; }
+</style>
+</head>
+<body>
+   <div class="grid"></div>
+   <div class="glow"></div>
+   <div class="content">
+     <span class="badge">BROWSER DUNGEON RPG</span>
+     <h1>Rogueライク<br>ダンジョンRPG<span class="sub">8フロアを制覇せよ</span></h1>
+     <div class="tags">
+       <span class="tag">複数フロア</span>
+       <span class="tag">戦闘・成長</span>
+       <span class="tag good">アイテム</span>
+       <span class="tag">トラップ</span>
+       <span class="tag good">単一ファイル</span>
+     </div>
+     <div class="footer">
+       <div class="url">github.com/kouhei1970/qwen_dungeon</div>
+       <div class="tech">HTML5 + CSS + Vanilla JS<br>外部ライブラリなし / FOV・ターン制</div>
+     </div>
+   </div>
+   <div class="glyphs">@ g s o G D ↓ ! / [</div>
+</body>
+</html>
